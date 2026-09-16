@@ -3,15 +3,17 @@
 from contextlib import nullcontext
 
 import mujoco
+import mujoco.viewer
 import numpy as np
 import math
+import time
 
-from pup.sim.pd import PDController, joint_state
+from pup.sim.pd import PDController
 from pup.sim.viewer import load_scene, reset_to_keyframe
 
 
 def stand_up(duration_s: float = 3.0, headless: bool = True,
-             kp: float = 10.0, kd: float = 1.0) -> dict:  # TODO(student): tune
+             kp: float = 50.0, kd: float = 1.0) -> dict: 
     """Return final_height (m), max_roll/max_pitch (rad), and fell (bool).
 
     Interpolate (12,) target angles from crouch to home in one second;
@@ -24,10 +26,13 @@ def stand_up(duration_s: float = 3.0, headless: bool = True,
     model, data = load_scene()
     reset_to_keyframe(model, data, 'crouch')
 
+    ctx = (nullcontext() if headless else mujoco.viewer.launch_passive(model, data))
+
     pd = PDController(kp, kd)
 
     dt: float = model.opt.timestep
-    n = math.ceil(1 / dt)
+    raise_n = math.ceil(1 / dt)
+    total_n = math.ceil(duration_s / dt)
 
     start = data.qpos[7:].copy()
     end = model.key('home').qpos[7:].copy()
@@ -35,24 +40,28 @@ def stand_up(duration_s: float = 3.0, headless: bool = True,
 
     max_roll = 0
     max_pitch = 0
-
-    for i in range(n):
-        w, x, y, z = data.qpos[3:7]
-        max_roll = max(abs(calc_roll(w, x, y, z)), max_roll)
-        max_pitch = max(abs(calc_pitch(w, x, y, z)), max_pitch)
-
-        target = start + (end - start) * i / n
-
-        data.ctrl = pd(data.qpos[7:], data.qvel[6:], target, qvel_target)
-
     fell = False
-    for i in range(math.ceil(duration_s / dt)):
-        if data.qpos[2] < .12:
-            fell = True
-        w, x, y, z = data.qpos[3:7]
-        max_roll = max(abs(calc_roll(w, x, y, z)), max_roll)
-        max_pitch = max(abs(calc_pitch(w, x, y, z)), max_pitch)
-        data.ctrl = pd(data.qpos[7:], data.qvel[6:], end, qvel_target)
+    with ctx as viewer: 
+        for i in range(total_n):
+            step_start = time.time()
+
+            w, x, y, z = data.qpos[3:7]
+            max_roll = max(abs(calc_roll(w, x, y, z)), max_roll)
+            max_pitch = max(abs(calc_pitch(w, x, y, z)), max_pitch)
+
+            target = start + (end - start) * min(1, i / raise_n)
+
+            data.ctrl[:] = pd(data.qpos[7:], data.qvel[6:], target, qvel_target)
+            mujoco.mj_step(model, data) # type: ignore
+
+            if viewer is not None:
+                if not viewer.is_running():
+                    break
+                viewer.sync()
+
+            sleep_time = model.opt.timestep - (time.time() - step_start)
+            if(sleep_time > 0):
+                time.sleep(sleep_time)
 
 
     return {
