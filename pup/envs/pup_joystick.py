@@ -79,10 +79,14 @@ class PupJoystick(mjx_env.MjxEnv):
         Units: rad/s (3), unit direction (3), m/s,m/s,rad/s (3), rad (12),
         rad/s (12), unitless (12). Sensor quaternions are wxyz (4,).
         """
-        # ===== TODO(student): Build the exact 45-dimensional observation =====
-        raise NotImplementedError(
-            "Stage 3: Build the exact 45-dimensional observation. See docs/03_mjx_environment.md")
-        # ===== end TODO =====
+        return jnp.concatenate([
+            data.qvel[3:6],
+            rotate(jnp.array([0, 0, -1]), quat_inv(data.qpos[3:7])),
+            info["command"],
+            data.qpos[7:],
+            data.qvel[6:],
+            info["last_act"]
+        ])
 
     def _get_termination(self, data: mjx.Data) -> jax.Array:
         """Return scalar bool for upside-down, height <0.12 m, or nonfinite qpos."""
