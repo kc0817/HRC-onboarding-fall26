@@ -3,6 +3,7 @@
 from typing import Any
 
 import jax
+from jax import random
 import jax.numpy as jnp
 import mujoco
 from mujoco import mjx
@@ -21,9 +22,9 @@ class PupJoystick(mjx_env.MjxEnv):
     def __init__(self, config=None, config_overrides: dict | None = None) -> None:
         """Load primitive-only Pup with position actuators and contact sensors."""
         super().__init__(config or default_config(), config_overrides)
-        self._mj_model = mujoco.MjModel.from_xml_path(str(MJX_SCENE))
+        self._mj_model = mujoco.MjModel.from_xml_path(str(MJX_SCENE)) # type: ignore
         self._mj_model.opt.timestep = self._config.sim_dt
-        self._mjx_model = mjx.put_model(self._mj_model, impl=self._config.impl)
+        self._mjx_model = mjx.put_model(self._mj_model, impl=self._config.impl) # type: ignore
         self._default_pose = jnp.array(self._mj_model.keyframe("home").qpos[7:])
         self._home = jnp.array(self._mj_model.keyframe("home").qpos)
         self._joint_limits = jnp.array(self._mj_model.jnt_range[1:])
@@ -33,8 +34,8 @@ class PupJoystick(mjx_env.MjxEnv):
             self._mj_model.sensor(name).adr[0] for name in CONTACT_SENSORS])
         noise = self._config.noise_config
         self._noise_scale = jnp.concatenate([
-            jnp.full(3, noise.gyro), jnp.full(3, noise.gravity), jnp.zeros(3),
-            jnp.full(12, noise.joint_pos), jnp.full(12, noise.joint_vel), jnp.zeros(12)])
+            jnp.full(3, noise.gyro), jnp.full(3, noise.gravity), jnp.zeros(3), # type: ignore
+            jnp.full(12, noise.joint_pos), jnp.full(12, noise.joint_vel), jnp.zeros(12)]) # type: ignore
 
     @property
     def xml_path(self) -> str:
@@ -47,7 +48,7 @@ class PupJoystick(mjx_env.MjxEnv):
         return 12
 
     @property
-    def mj_model(self) -> mujoco.MjModel:
+    def mj_model(self) -> mujoco.MjModel: # type: ignore
         """Return the CPU model used for sensor addresses and rendering."""
         return self._mj_model
 
@@ -59,17 +60,17 @@ class PupJoystick(mjx_env.MjxEnv):
     def reset(self, rng: jax.Array) -> mjx_env.State:
         """Return initial State with (45,) observation; rng is a JAX PRNG key."""
         rng, pose_key, command_key = jax.random.split(rng, 3)
-        qpos = self._home.at[7:].add(self._config.reset_noise *
+        qpos = self._home.at[7:].add(self._config.reset_noise * # type: ignore
                                     jax.random.uniform(pose_key, (12,), minval=-1, maxval=1))
         data = mjx_env.make_data(self.mj_model, qpos=qpos, ctrl=self._default_pose,
-                                 impl=self._config.impl, naconmax=self._config.naconmax,
-                                 njmax=self._config.njmax)
+                                 impl=self._config.impl, naconmax=self._config.naconmax, # type: ignore
+                                 njmax=self._config.njmax) # type: ignore
         data = mjx.forward(self.mjx_model, data)
         info = dict(rng=rng, command=self.sample_command(command_key),
                     step=jnp.int32(0), last_act=jnp.zeros(12), last_last_act=jnp.zeros(12),
                     feet_air_time=jnp.zeros(4), last_contact=jnp.zeros(4, dtype=bool),
                     fixed_command=jnp.bool_(False))
-        metrics = {name: jnp.zeros(()) for name in self._config.reward_config.scales}
+        metrics = {name: jnp.zeros(()) for name in self._config.reward_config.scales} # type: ignore
         return mjx_env.State(data, self._get_obs(data, info), jnp.zeros(()),
                              jnp.zeros(()), metrics, info)
 
@@ -79,7 +80,7 @@ class PupJoystick(mjx_env.MjxEnv):
         Units: rad/s (3), unit direction (3), m/s,m/s,rad/s (3), rad (12),
         rad/s (12), unitless (12). Sensor quaternions are wxyz (4,).
         """
-        return jnp.concatenate([
+        arr = jnp.concatenate([
             data.qvel[3:6],
             rotate(jnp.array([0, 0, -1]), quat_inv(data.qpos[3:7])),
             info["command"],
@@ -87,20 +88,27 @@ class PupJoystick(mjx_env.MjxEnv):
             data.qvel[6:],
             info["last_act"]
         ])
+        noise = random.uniform(info['rng'], minval=-1, maxval=1)
+        return arr * noise * self._noise_scale
 
     def _get_termination(self, data: mjx.Data) -> jax.Array:
         """Return scalar bool for upside-down, height <0.12 m, or nonfinite qpos."""
-        # ===== TODO(student): Detect falls and invalid simulation states =====
-        raise NotImplementedError(
-            "Stage 3: Detect falls and invalid simulation states. See docs/03_mjx_environment.md")
-        # ===== end TODO =====
+        return jnp.logical_or(get_sensor_data(self.mj_model, data, "upvector")[2] < 0, 
+                jnp.logical_or(data.qpos[2] < .12, jnp.isnan(data.qpos).any()))
 
     def sample_command(self, rng: jax.Array) -> jax.Array:
         """Sample (3,) vx,vy,yaw within config ranges, with 10% exactly zero."""
-        # ===== TODO(student): Sample a bounded command including standing =====
-        raise NotImplementedError(
-            "Stage 3: Sample a bounded command including standing. See docs/03_mjx_environment.md")
-        # ===== end TODO =====
+        n, vx_rng, vy_rng, yaw_rng = random.split(rng)
+
+        min = self._config['command_config']['minimum'] # type: ignore[index]
+        max = self._config['command_config']['maximum'] #type: ignore[index]
+
+        vx = random.uniform(vx_rng, min[0], max[0]) # type: ignore[index]
+        vy = random.uniform(vy_rng, min[1], max[1]) # type: ignore[index]
+        yaw = random.uniform(yaw_rng, min[2], max[2]) # type: ignore[index]
+        return jnp.where(random.uniform(n, minval=0, maxval=1) > .1, 
+                    jnp.array([vx, vy, yaw]), 
+                    jnp.array([0, 0, 0]))
 
     def _update_feet(self, data: mjx.Data, info: dict) -> tuple:
         """Read (4,) contact flags from sensors; accumulate swing durations in s."""
@@ -112,7 +120,7 @@ class PupJoystick(mjx_env.MjxEnv):
     def _maybe_resample_command(self, rng: jax.Array, info: dict, step: jax.Array) -> dict:
         """Refresh commands every configured number of 50 Hz control steps."""
         rng, key = jax.random.split(rng)
-        resample = (step % self._config.command_config.resample_steps == 0)
+        resample = (step % self._config.command_config.resample_steps == 0) # type: ignore
         resample &= ~info["fixed_command"]
         return {**info, "rng": rng,
                 "command": jnp.where(resample, self.sample_command(key), info["command"])}
@@ -139,16 +147,33 @@ class PupJoystick(mjx_env.MjxEnv):
 
     def step(self, state: mjx_env.State, action: jax.Array) -> mjx_env.State:
         """Advance 0.02 s with (12,) unitless actions; return the same State tree."""
-        info = dict(state.info)
-        # ===== TODO(student): Apply targets, step physics, and assemble scaled rewards =====
-        raise NotImplementedError(
-            "Stage 3: Apply targets, step physics, and assemble scaled rewards. See docs/03_mjx_environment.md")
-        # ===== end TODO =====
+        data = state.data
+
+        target = self._default_pose + action * self._config['action_scale'] # type: ignore[index]
+        data = mjx_env.step(self.mjx_model, data, target, self.n_substeps)
+
+        info, contact, first_contact = self._update_feet(data, state.info)
+        done = self._get_termination(data)
+        raw_reward = self._reward_terms(data, action, info, done, first_contact)
+        scaled = dict()
+        reward_scalar = 0
+
+        for key in raw_reward:
+            weight = self._config.reward_config.scales.get(key) # type: ignore
+            scaled[key] = weight * raw_reward.get(key)
+            reward_scalar += scaled[key]
+
+        reward_scalar *= self.dt
+        reward_scalar = jnp.clip(reward_scalar, min=0, max=10000)
+
+        info['last_last_act'] = info['last_act']
+        info['last_act'] = action
+
         # Brax wrappers add their own metric keys; update, never replace.
         metrics = {**state.metrics, **scaled}
         info.update(feet_air_time=info["feet_air_time"] * ~contact,
                     last_contact=contact, step=info["step"] + 1)
         info = self._maybe_resample_command(info["rng"], info, info["step"])
         obs = self._get_obs(data, info)
-        return state.replace(data=data, obs=obs, reward=reward,
+        return state.replace(data=data, obs=obs, reward=reward_scalar,
                               done=done.astype(jnp.float32), metrics=metrics, info=info)
