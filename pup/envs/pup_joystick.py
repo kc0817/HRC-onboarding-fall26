@@ -80,16 +80,20 @@ class PupJoystick(mjx_env.MjxEnv):
         Units: rad/s (3), unit direction (3), m/s,m/s,rad/s (3), rad (12),
         rad/s (12), unitless (12). Sensor quaternions are wxyz (4,).
         """
+        raw_noise = random.uniform(info['rng'], shape=(45,), minval=-1, maxval=1)
+        noise = raw_noise * self._config.noise_config['level']
+        # noise = raw_noise * 0
+
+        print(data.qpos[3:7])
         arr = jnp.concatenate([
             data.qvel[3:6],
             rotate(jnp.array([0, 0, -1]), quat_inv(data.qpos[3:7])),
             info["command"],
-            data.qpos[7:],
+            data.qpos[7:] - self._default_pose,
             data.qvel[6:],
             info["last_act"]
         ])
-        noise = random.uniform(info['rng'], minval=-1, maxval=1)
-        return arr * noise * self._noise_scale
+        return arr + self._noise_scale * noise
 
     def _get_termination(self, data: mjx.Data) -> jax.Array:
         """Return scalar bool for upside-down, height <0.12 m, or nonfinite qpos."""
@@ -98,14 +102,14 @@ class PupJoystick(mjx_env.MjxEnv):
 
     def sample_command(self, rng: jax.Array) -> jax.Array:
         """Sample (3,) vx,vy,yaw within config ranges, with 10% exactly zero."""
-        n, vx_rng, vy_rng, yaw_rng = random.split(rng)
+        n, vx_rng, vy_rng, yaw_rng = random.split(rng, num=4)
 
         min = self._config['command_config']['minimum'] # type: ignore[index]
         max = self._config['command_config']['maximum'] #type: ignore[index]
 
-        vx = random.uniform(vx_rng, min[0], max[0]) # type: ignore[index]
-        vy = random.uniform(vy_rng, min[1], max[1]) # type: ignore[index]
-        yaw = random.uniform(yaw_rng, min[2], max[2]) # type: ignore[index]
+        vx = random.uniform(vx_rng, minval=min[0], maxval=max[0]) # type: ignore[index]
+        vy = random.uniform(vy_rng, minval=min[1], maxval=max[1]) # type: ignore[index]
+        yaw = random.uniform(yaw_rng, minval=min[2], maxval=max[2]) # type: ignore[index]
         return jnp.where(random.uniform(n, minval=0, maxval=1) > .1, 
                     jnp.array([vx, vy, yaw]), 
                     jnp.array([0, 0, 0]))
@@ -177,3 +181,7 @@ class PupJoystick(mjx_env.MjxEnv):
         obs = self._get_obs(data, info)
         return state.replace(data=data, obs=obs, reward=reward_scalar,
                               done=done.astype(jnp.float32), metrics=metrics, info=info)
+
+
+# pup_j = PupJoystick()
+# print(pup_j.reset(random.PRNGKey(0)).obs)
