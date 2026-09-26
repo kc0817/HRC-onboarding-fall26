@@ -58,10 +58,32 @@ def export_policy(params: Any, normalizer_params: Any, out_path: str | Path) -> 
     ``action_scale``, ``default_pose`` (12,), ``hidden_activation`` and
     ``obs_layout``.
     """
-    # ===== TODO(student): Walk the Brax parameter tree and serialize it =====
-    raise NotImplementedError(
-        "Stage 4: Walk the Brax parameter tree and serialize it. See docs/04_training_with_brax.md")
-    # ===== end TODO =====
+    data = {
+        "obs_mean": normalizer_params.mean,
+        "obs_std": normalizer_params.std,
+        "obs_size": normalizer_params.mean.shape[0],
+        "action_scale": ACTION_SCALE,
+        "default_pose": DEFAULT_POSE,
+        "hidden_activation": "swish",
+        "obs_layout": OBS_LAYOUT,
+    }
+    i = 0
+    while True:
+        key = "hidden_" + str(i)
+        if key not in params["params"]:
+            break
+        data["kernel_" + str(i)] = params["params"][key]["kernel"]
+        data["bias_" + str(i)] = params["params"][key]["bias"]
+        i += 1
+
+    data["n_layers"] = i
+    data["action_size"] = params["params"]["hidden_" + str(i - 1)]["kernel"].shape[1] // 2
+
+    path = Path(out_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(path, **data)
+
+    return path.resolve()
 
 
 def load_brax_params(checkpoint: str | Path) -> tuple:
@@ -76,7 +98,7 @@ def load_brax_params(checkpoint: str | Path) -> tuple:
     if path.is_dir():
         from brax.training.agents.ppo import checkpoint as ppo_checkpoint
 
-        params = ppo_checkpoint.load(path)
+        params = ppo_checkpoint.load(path)  # type: ignore
     else:
         from brax.io import model as model_io
 
@@ -87,8 +109,11 @@ def load_brax_params(checkpoint: str | Path) -> tuple:
 def main() -> None:
     """Convert a checkpoint written by ``train_ppo.py`` into a numpy ``.npz``."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--checkpoint", required=True,
-                        help="runs/<name>/policy.pkl, or an Orbax checkpoint directory")
+    parser.add_argument(
+        "--checkpoint",
+        required=True,
+        help="runs/<name>/policy.pkl, or an Orbax checkpoint directory",
+    )
     parser.add_argument("--out", required=True, help="destination .npz")
     args = parser.parse_args()
     normalizer_params, policy_params = load_brax_params(args.checkpoint)
