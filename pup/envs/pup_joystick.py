@@ -81,7 +81,7 @@ class PupJoystick(mjx_env.MjxEnv):
         rad/s (12), unitless (12). Sensor quaternions are wxyz (4,).
         """
         raw_noise = random.uniform(info['rng'], shape=(45,), minval=-1, maxval=1)
-        noise = raw_noise * self._config.noise_config['level']
+        noise = raw_noise * self._config.noise_config['level'] #type: ignore
         # noise = raw_noise * 0
 
         print(data.qpos[3:7])
@@ -93,7 +93,7 @@ class PupJoystick(mjx_env.MjxEnv):
             data.qvel[6:],
             info["last_act"]
         ])
-        return arr + self._noise_scale * noise
+        return arr + self._noise_scale * noise #type: ignore
 
     def _get_termination(self, data: mjx.Data) -> jax.Array:
         """Return scalar bool for upside-down, height <0.12 m, or nonfinite qpos."""
@@ -179,7 +179,7 @@ class PupJoystick(mjx_env.MjxEnv):
                     last_contact=contact, step=info["step"] + 1)
         info = self._maybe_resample_command(info["rng"], info, info["step"])
         obs = self._get_obs(data, info)
-        return state.replace(data=data, obs=obs, reward=reward_scalar,
+        return state.replace(data=data, obs=obs, reward=reward_scalar, #type: ignore
                               done=done.astype(jnp.float32), metrics=metrics, info=info)
 
 
