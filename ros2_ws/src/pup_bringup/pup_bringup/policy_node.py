@@ -111,11 +111,11 @@ class PolicyNode(Node):
         av = self.imu.angular_velocity
         return np.concatenate(
             [
-                np.array([av.x, av.y, av.z]),  # type: ignore
+                np.array([av.x, av.y, av.z]),
                 gravity_in_body_frame(quat_wxyz_from_xyzw(self.imu.orientation)),
                 np.array(self.command),
                 pos - self.default_pose,
-                -vel,
+                vel,
                 self.last_action,
             ]
         )
