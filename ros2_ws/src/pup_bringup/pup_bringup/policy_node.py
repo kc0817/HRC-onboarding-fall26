@@ -81,31 +81,24 @@ class PolicyNode(Node):
 
     def _on_joint_state(self, message: JointState) -> None:
         """Store the most recent JointState (positions rad, velocities rad/s)."""
-        # ===== TODO(student): Cache the latest JointState =====
-        raise NotImplementedError(
-            "Stage 5: Cache the latest JointState. See docs/05_ros2_sim2sim.md")
-        # ===== end TODO =====
+        self.joint_state = message
 
     def _on_imu(self, message: Imu) -> None:
         """Store the most recent Imu (orientation xyzw, angular velocity rad/s)."""
-        # ===== TODO(student): Cache the latest Imu =====
-        raise NotImplementedError(
-            "Stage 5: Cache the latest Imu. See docs/05_ros2_sim2sim.md")
-        # ===== end TODO =====
+        self.imu = message
 
     def _on_cmd_vel(self, message: Twist) -> None:
         """Store the latest teleop command as (vx, vy, wz) in m/s, m/s, rad/s."""
-        # ===== TODO(student): Cache the latest velocity command =====
-        raise NotImplementedError(
-            "Stage 5: Cache the latest velocity command. See docs/05_ros2_sim2sim.md")
-        # ===== end TODO =====
+        self.command = np.array([message.linear.x, message.linear.y, message.angular.z])
 
     def _ordered_joint_state(self) -> tuple[np.ndarray, np.ndarray]:
         """Return (q, qd), each (12,), reordered from JointState.name into JOINT_NAMES order."""
         index = {name: position for position, name in enumerate(self.joint_state.name)}
         order = [index[name] for name in JOINT_NAMES]
-        return (np.asarray(self.joint_state.position, float)[order],
-                np.asarray(self.joint_state.velocity, float)[order])
+        return (
+            np.asarray(self.joint_state.position, float)[order],
+            np.asarray(self.joint_state.velocity, float)[order],
+        )
 
     def _build_observation(self) -> np.ndarray:
         """Return the (45,) observation, identical in order and units to Stage 3.
@@ -114,17 +107,32 @@ class PolicyNode(Node):
         command (3, m/s m/s rad/s) | q - default_pose (12, rad) |
         qd (12, rad/s) | last_action (12, unitless).
         """
-        # ===== TODO(student): Assemble the 45-dimensional observation =====
-        raise NotImplementedError(
-            "Stage 5: Assemble the 45-dimensional observation. See docs/05_ros2_sim2sim.md")
-        # ===== end TODO =====
+        pos, vel = self._ordered_joint_state()
+        av = self.imu.angular_velocity
+        return np.concatenate(
+            [
+                np.array([av.x, av.y, av.z]),  # type: ignore
+                gravity_in_body_frame(quat_wxyz_from_xyzw(self.imu.orientation)),
+                np.array(self.command),
+                pos - self.default_pose,
+                -vel,
+                self.last_action,
+            ]
+        )
 
     def _on_timer(self) -> None:
         """Run one 50 Hz control tick: observe, infer, publish."""
-        # ===== TODO(student): Wait for sensors, run the policy, publish the command =====
-        raise NotImplementedError(
-            "Stage 5: Wait for sensors, run the policy, publish the command. See docs/05_ros2_sim2sim.md")
-        # ===== end TODO =====
+        if self.joint_state is None or self.imu is None:
+            return
+        obs = self._build_observation()
+        self.last_action = self.policy(obs)
+        msg = JointCommand()
+        msg.position = (self.default_pose + self.last_action * self.action_scale).tolist()
+        msg.kp = self.get_parameter("kp").value
+        msg.kd = self.get_parameter("kd").value
+        self.publisher.publish(msg)
+
+        self.publish_count += 1
 
     def _log_rate(self) -> None:
         """Report the achieved control rate once a second."""
@@ -132,7 +140,8 @@ class PolicyNode(Node):
             self.get_logger().warn("waiting for /pup/joint_states and /pup/imu ...")
             return
         self.get_logger().info(
-            f"{self.publish_count} Hz | command={np.round(self.command, 2).tolist()}")
+            f"{self.publish_count} Hz | command={np.round(self.command, 2).tolist()}"
+        )
         self.publish_count = 0
 
 

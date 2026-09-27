@@ -30,7 +30,6 @@ def gravity_in_body_frame(q_wb: np.ndarray) -> np.ndarray:
     return quat_rotate(quat_inv(q_wb), GRAVITY_DIRECTION)
 
 
-def quat_wxyz_from_xyzw(q_xyzw) -> np.ndarray:
+def quat_wxyz_from_xyzw(q) -> np.ndarray:
     """Reorder a ROS ``geometry_msgs/Quaternion``-style (4,) xyzw into wxyz."""
-    x, y, z, w = (float(value) for value in q_xyzw)
-    return np.array([w, x, y, z])
+    return np.array([q.w, q.x, q.y, q.z])
