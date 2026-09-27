@@ -127,9 +127,9 @@ class PolicyNode(Node):
         obs = self._build_observation()
         self.last_action = self.policy(obs)
         msg = JointCommand()
-        msg.position = (self.default_pose + self.last_action * self.action_scale).tolist()
-        msg.kp = self.get_parameter("kp").value
-        msg.kd = self.get_parameter("kd").value
+        msg.position = (self.default_pose + self.last_action * self.policy.action_scale).tolist()
+        msg.kp = [self.kp for _ in range(12)]
+        msg.kd = [self.kd for _ in range(12)]
         self.publisher.publish(msg)
 
         self.publish_count += 1
